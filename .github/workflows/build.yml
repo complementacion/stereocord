@@ -1,5 +1,5 @@
 name: Build StereoCord Installer
- 
+
 on:
   push:
     branches: [main, master]
@@ -8,12 +8,11 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
- 
+
 jobs:
   build:
     name: Build en ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
- 
     strategy:
       fail-fast: false
       matrix:
@@ -22,90 +21,99 @@ jobs:
             target: node20-win-x64
             output: StereoCord-installer-win.exe
             artifact: win-installer
- 
           - os: ubuntu-latest
             target: node20-linux-x64
             output: StereoCord-installer-linux
             artifact: linux-installer
- 
           - os: macos-latest
             target: node20-macos-x64
             output: StereoCord-installer-mac
             artifact: mac-installer
- 
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
- 
+
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
- 
+
       - name: Instalar dependencias
         run: npm install
- 
+
       - name: Crear carpeta dist
-        run: mkdir -p dist
- 
+        run: node -e "require('fs').mkdirSync('dist', {recursive:true})"
+
+      - name: Generar install.bundled.js con src embebido
+        run: |
+          node -e "
+          const fs = require('fs'), path = require('path');
+          const files = {};
+          function walk(dir, base) {
+            for (const e of fs.readdirSync(dir)) {
+              const full = path.join(dir, e);
+              const rel  = path.relative(base, full).replace(/\\\\/g, '/');
+              if (fs.statSync(full).isDirectory()) { walk(full, base); }
+              else { files[rel] = fs.readFileSync(full).toString('base64'); }
+            }
+          }
+          walk('src', '.');
+          const header = 'const __EMBEDDED__ = ' + JSON.stringify(files) + ';\n';
+          const body   = fs.readFileSync('install.js', 'utf8');
+          fs.writeFileSync('install.bundled.js', header + body);
+          console.log('Bundled', Object.keys(files).length, 'files into install.bundled.js');
+          "
+
       - name: Build binario (Unix)
         if: runner.os != 'Windows'
         run: |
-          npx pkg install.js \
+          npx pkg install.bundled.js \
             --targets ${{ matrix.target }} \
             --output dist/${{ matrix.output }} \
             --compress GZip
- 
+
       - name: Build binario (Windows)
         if: runner.os == 'Windows'
-        run: npx pkg install.js --targets ${{ matrix.target }} --output dist/${{ matrix.output }} --compress GZip
- 
+        run: npx pkg install.bundled.js --targets ${{ matrix.target }} --output dist/${{ matrix.output }} --compress GZip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.output }}
           retention-days: 7
- 
+
   release:
     name: Crear Release
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
- 
     permissions:
       contents: write
- 
     steps:
       - name: Descargar todos los artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist/
- 
-      - name: Listar archivos descargados
-        run: find dist/ -type f
- 
+
       - name: Crear GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: StereoCord ${{ github.ref_name }}
           body: |
             ## StereoCord ${{ github.ref_name }}
- 
             ### Instalación
-            1. Descarga el instalador para tu sistema operativo
-            2. Cierra Discord completamente
-            3. Ejecuta el instalador como administrador
-            4. Abre Discord — verás el ícono 🎧 en los ajustes
- 
-            ### Archivos
+            1. Descargá el instalador para tu sistema operativo
+            2. Cerrá Discord completamente
+            3. Ejecutá el instalador (Windows: click derecho → Ejecutar como administrador)
+            4. Abrí Discord — vas a ver el ícono 🎧 en Ajustes
+
             | Sistema | Archivo |
             |---------|---------|
-            | Windows | `StereoCord-installer-win.exe` |
-            | Linux   | `StereoCord-installer-linux` |
-            | macOS   | `StereoCord-installer-mac` |
- 
-            > ⚠️ El uso de clientes modificados puede violar los TOS de Discord.
+            | Windows | StereoCord-installer-win.exe |
+            | Linux   | StereoCord-installer-linux |
+            | macOS   | StereoCord-installer-mac |
           files: |
             dist/win-installer/StereoCord-installer-win.exe
             dist/linux-installer/StereoCord-installer-linux
