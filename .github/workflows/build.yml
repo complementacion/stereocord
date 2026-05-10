@@ -44,7 +44,7 @@ jobs:
           cache: 'npm'
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm install
 
       - name: Crear carpeta dist
         run: mkdir -p dist
