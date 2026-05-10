@@ -9,16 +9,19 @@ const Webpack = {
   _cache: null,
   _req:   null,
 
-  /** Esperar a que Webpack de Discord esté listo */
-  waitForReady() {
+ waitForReady() {
     return new Promise(resolve => {
+      let attempts = 0;
+      const MAX = 50; // 5 segundos máximo
       const check = () => {
-        // ✅ FIX: guardamos req aquí y no llamamos _getWebpackRequire de nuevo en _buildCache
         const req = this._getWebpackRequire();
         if (req) {
           this._req   = req;
           this._cache = req.c;
           resolve();
+        } else if (attempts++ >= MAX) {
+          console.warn('[StereoCord/Webpack] webpackChunkdiscord_app no encontrado, continuando sin webpack');
+          resolve(); // Continuar igual para que SettingsPanel cargue
         } else {
           setTimeout(check, 100);
         }
