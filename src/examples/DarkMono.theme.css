@@ -1,0 +1,58 @@
+/**
+ * @name        Dark Mono
+ * @description Tema oscuro monocromático con acento azul oscuro. Minimalista y limpio.
+ * @version     1.0.0
+ * @author      StereoCord
+ */
+
+/* ── Paleta ── */
+:root {
+  --background-primary:    #0d0d0d;
+  --background-secondary:  #111111;
+  --background-tertiary:   #161616;
+  --background-accent:     #1a1a1a;
+  --background-floating:   #0d0d0d;
+  --background-modifier-hover:   rgba(255,255,255,0.04);
+  --background-modifier-active:  rgba(255,255,255,0.08);
+  --background-modifier-selected: rgba(255,255,255,0.08);
+  --channeltextarea-background:  #1a1a1a;
+  --text-normal:           #c8c8c8;
+  --text-muted:            #555;
+  --text-link:             #6a9fb5;
+  --interactive-normal:    #aaa;
+  --interactive-hover:     #ddd;
+  --interactive-active:    #fff;
+  --interactive-muted:     #444;
+  --header-primary:        #e0e0e0;
+  --header-secondary:      #888;
+}
+
+/* Barra lateral */
+[class*="sidebar"] {
+  background: var(--background-secondary) !important;
+}
+
+/* Área de mensajes */
+[class*="chat"] {
+  background: var(--background-primary) !important;
+}
+
+/* Input de mensaje */
+[class*="textArea"] {
+  background: var(--channeltextarea-background) !important;
+  border-radius: 8px !important;
+}
+
+/* Bordes y separadores sutiles */
+[class*="divider"] {
+  border-color: #222 !important;
+}
+
+/* Scrollbar fina */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* Miembros online — color más sutil */
+[class*="online"] { background: #3a3a3a !important; }

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/plugins/*.plugin.js
+data/themes/*.theme.css
+data/custom.css
+data/plugins.settings.json
+data/themes.settings.json
+*.sc_backup_*
+.DS_Store
+Thumbs.db
+*.log
