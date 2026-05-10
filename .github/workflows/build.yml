@@ -1,5 +1,5 @@
 name: Build StereoCord Installer
-
+ 
 on:
   push:
     branches: [main, master]
@@ -8,12 +8,12 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
-
+ 
 jobs:
   build:
     name: Build en ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-
+ 
     strategy:
       fail-fast: false
       matrix:
@@ -22,85 +22,89 @@ jobs:
             target: node20-win-x64
             output: StereoCord-installer-win.exe
             artifact: win-installer
-
+ 
           - os: ubuntu-latest
             target: node20-linux-x64
             output: StereoCord-installer-linux
             artifact: linux-installer
-
+ 
           - os: macos-latest
             target: node20-macos-x64
             output: StereoCord-installer-mac
             artifact: mac-installer
-
+ 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+ 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'      
-
+          node-version: '20'
+ 
       - name: Instalar dependencias
         run: npm install
-
+ 
       - name: Crear carpeta dist
         run: mkdir -p dist
-
-      - name: Build binario
+ 
+      - name: Build binario (Unix)
+        if: runner.os != 'Windows'
         run: |
           npx pkg install.js \
             --targets ${{ matrix.target }} \
             --output dist/${{ matrix.output }} \
             --compress GZip
-
+ 
+      - name: Build binario (Windows)
+        if: runner.os == 'Windows'
+        run: npx pkg install.js --targets ${{ matrix.target }} --output dist/${{ matrix.output }} --compress GZip
+ 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.output }}
           retention-days: 7
-
-  # Crear GitHub Release automático cuando se hace push de un tag v*
+ 
   release:
     name: Crear Release
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-
+ 
     permissions:
       contents: write
-
+ 
     steps:
       - name: Descargar todos los artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist/
-
+ 
       - name: Listar archivos descargados
         run: find dist/ -type f
-
+ 
       - name: Crear GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: StereoCord ${{ github.ref_name }}
           body: |
             ## StereoCord ${{ github.ref_name }}
-
+ 
             ### Instalación
             1. Descarga el instalador para tu sistema operativo
             2. Cierra Discord completamente
             3. Ejecuta el instalador como administrador
             4. Abre Discord — verás el ícono 🎧 en los ajustes
-
+ 
             ### Archivos
             | Sistema | Archivo |
             |---------|---------|
             | Windows | `StereoCord-installer-win.exe` |
             | Linux   | `StereoCord-installer-linux` |
             | macOS   | `StereoCord-installer-mac` |
-
+ 
             > ⚠️ El uso de clientes modificados puede violar los TOS de Discord.
           files: |
             dist/win-installer/StereoCord-installer-win.exe
