@@ -1,31 +1,137 @@
-/**
- * StereoCord Installer
- * Cuando corre como .exe (pkg), primero extrae los archivos al sistema de archivos real
- * en %APPDATA%\StereoCord, luego parchea Discord desde ahí.
- */
+'use strict';
+// Los archivos src son embebidos aquí por el CI antes de compilar con pkg:
+// const __EMBEDDED__ = { "src/app/index.js": "<base64>", ... };
+// (Si corrés con `node install.js` directamente, __EMBEDDED__ no existe y usa el filesystem)
 
 const fs   = require('fs');
 const path = require('path');
 const os   = require('os');
 
-// ── Rutas base ────────────────────────────────────────────────────────────────
-const IS_PKG = !!process.pkg;
+const IS_PKG      = typeof process.pkg !== 'undefined';
+const HAS_EMBED   = typeof __EMBEDDED__ !== 'undefined'; // eslint-disable-line no-undef
 
-const INSTALL_DIR = IS_PKG
-  ? path.join(process.env.APPDATA || os.homedir(), 'StereoCord')
-  : __dirname;
+const HEADER = `
+╔══════════════════════════════════════╗
+║       StereoCord  Installer  v1.0    ║
+╚══════════════════════════════════════╝`;
+console.log(HEADER);
 
-const SOURCE_DIR = __dirname;
+// ─── Resolver rutas según el modo ─────────────────────────────────────────────
+let SRC_BASE;
 
-// ── Extraer archivos del snapshot al sistema de archivos real ─────────────────
-function extractFiles() {
-  if (!IS_PKG) return;
+if (IS_PKG && HAS_EMBED) {
+  // Corriendo como .exe: extraer archivos embebidos a AppData
+  const SC_DIR = path.join(os.homedir(), 'AppData', 'Roaming', 'StereoCord');
+  console.log(`\n📂  Extrayendo archivos a: ${SC_DIR}`);
 
-  console.log(`📂  Extrayendo archivos a: ${INSTALL_DIR}\n`);
+  fs.mkdirSync(path.join(SC_DIR, 'data', 'plugins'), { recursive: true });
+  fs.mkdirSync(path.join(SC_DIR, 'data', 'themes'),  { recursive: true });
 
-  const files = [
-    'src/app/index.js',
-    'src/app/package.json',
+  let errCount = 0;
+  const embedded = __EMBEDDED__; // eslint-disable-line no-undef
+  for (const [rel, b64] of Object.entries(embedded)) {
+    const dest = path.join(SC_DIR, rel);
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, Buffer.from(b64, 'base64'));
+    } catch (e) {
+      console.error(`  ✗  Error extrayendo ${rel}: ${e.message}`);
+      errCount++;
+    }
+  }
+
+  if (errCount === 0) {
+    console.log('  ✓  Archivos extraídos correctamente\n');
+  } else {
+    console.error(`  ⚠  ${errCount} archivo(s) con error\n`);
+  }
+
+  SRC_BASE = SC_DIR;
+
+} else if (!IS_PKG) {
+  // Corriendo como script normal: usar directorio actual
+  SRC_BASE = __dirname;
+} else {
+  console.error('❌  El instalador fue compilado sin los archivos embebidos.');
+  console.error('    Usá el workflow de GitHub Actions para compilar correctamente.');
+  process.exit(1);
+}
+
+// ─── Buscar instalaciones de Discord ─────────────────────────────────────────
+const DISCORD_APPS = [
+  { name: 'Discord',       base: path.join(os.homedir(), 'AppData', 'Local', 'Discord') },
+  { name: 'DiscordCanary', base: path.join(os.homedir(), 'AppData', 'Local', 'DiscordCanary') },
+  { name: 'DiscordPTB',    base: path.join(os.homedir(), 'AppData', 'Local', 'DiscordPTB') },
+];
+
+function findDiscordInstalls() {
+  const found = [];
+  for (const app of DISCORD_APPS) {
+    if (!fs.existsSync(app.base)) continue;
+    for (const entry of fs.readdirSync(app.base).filter(e => e.startsWith('app-'))) {
+      const resources = path.join(app.base, entry, 'resources');
+      if (fs.existsSync(resources)) {
+        found.push({ label: `${app.name} ${entry}`, resources });
+      }
+    }
+  }
+  return found;
+}
+
+const installs = findDiscordInstalls();
+if (installs.length === 0) {
+  console.error('❌  No se encontró ninguna instalación de Discord.');
+  process.exit(1);
+}
+
+console.log(`📦  Instalaciones encontradas: ${installs.length}`);
+installs.forEach((inst, i) => {
+  console.log(`  [${i + 1}] ${inst.label}`);
+  console.log(`      ${inst.resources}`);
+});
+
+// ─── Copia recursiva ──────────────────────────────────────────────────────────
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src)) {
+    const s = path.join(src, entry);
+    const d = path.join(dest, entry);
+    fs.statSync(s).isDirectory() ? copyDir(s, d) : fs.copyFileSync(s, d);
+  }
+}
+
+// ─── Instalar en cada Discord ─────────────────────────────────────────────────
+let anyError = false;
+
+for (const inst of installs) {
+  console.log(`\n⚙   Instalando en: ${inst.label}...`);
+  const appDest = path.join(inst.resources, 'app');
+
+  // Backup
+  if (fs.existsSync(appDest)) {
+    const backup = `${appDest}.sc_backup_${Date.now()}`;
+    try {
+      fs.renameSync(appDest, backup);
+      console.log(`  ⚠  Backup: ${backup}`);
+    } catch (e) {
+      console.error(`  ✗  No se pudo hacer backup: ${e.message}`);
+      anyError = true;
+      continue;
+    }
+  }
+
+  // Copiar src/app/ → resources/app/
+  try {
+    copyDir(path.join(SRC_BASE, 'src', 'app'), appDest);
+  } catch (e) {
+    console.error(`  ✗  Error copiando app/: ${e.message}`);
+    anyError = true;
+    continue;
+  }
+
+  // Copiar el resto de src/ a resources/app/_stereocord/
+  const scDir = path.join(appDest, '_stereocord');
+  const extras = [
     'src/preload.js',
     'src/renderer.js',
     'src/core/pluginManager.js',
@@ -35,153 +141,30 @@ function extractFiles() {
     'src/ui/styles.css',
   ];
 
-  for (const file of files) {
-    const srcPath  = path.join(SOURCE_DIR, file);
-    const destPath = path.join(INSTALL_DIR, file);
+  let ok = true;
+  for (const rel of extras) {
+    const src  = path.join(SRC_BASE, rel);
+    const dest = path.join(scDir, rel.replace('src/', ''));
     try {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, fs.readFileSync(srcPath));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest);
     } catch (e) {
-      console.error(`  ✗  Error extrayendo ${file}: ${e.message}`);
+      console.error(`  ✗  ${rel}: ${e.message}`);
+      ok = false;
+      anyError = true;
     }
   }
 
-  console.log('  ✓  Archivos extraídos\n');
+  console.log(ok ? `  ✅  ${inst.label} instalado` : `  ⚠  ${inst.label} instalado con errores`);
 }
 
-// ── Encontrar instalaciones de Discord ────────────────────────────────────────
-function findDiscordInstallations() {
-  const installations = [];
-  const platform = os.platform();
-
-  const searchPaths = {
-    win32: [
-      path.join(os.homedir(), 'AppData', 'Local', 'Discord'),
-      path.join(os.homedir(), 'AppData', 'Local', 'DiscordCanary'),
-      path.join(os.homedir(), 'AppData', 'Local', 'DiscordPTB'),
-      path.join(os.homedir(), 'AppData', 'Local', 'DiscordDevelopment'),
-    ],
-    linux: [
-      '/usr/share/discord',
-      '/usr/lib/discord',
-      path.join(os.homedir(), '.local', 'share', 'discord'),
-      '/opt/discord',
-      '/snap/discord/current/usr/lib/discord',
-    ],
-    darwin: [
-      '/Applications/Discord.app/Contents/Resources',
-      '/Applications/Discord Canary.app/Contents/Resources',
-      path.join(os.homedir(), 'Applications', 'Discord.app', 'Contents', 'Resources'),
-    ]
-  };
-
-  const paths = searchPaths[platform] || [];
-
-  for (const basePath of paths) {
-    if (!fs.existsSync(basePath)) continue;
-
-    if (platform === 'darwin') {
-      const asarPath = path.join(basePath, 'app.asar');
-      if (fs.existsSync(asarPath)) {
-        installations.push({
-          resources: basePath,
-          name: path.basename(path.dirname(path.dirname(basePath)))
-        });
-      }
-    } else {
-      try {
-        const entries = fs.readdirSync(basePath);
-        for (const entry of entries) {
-          if (!entry.startsWith('app-')) continue;
-          const versionPath = path.join(basePath, entry, 'resources');
-          const asarPath    = path.join(versionPath, 'app.asar');
-          if (fs.existsSync(asarPath)) {
-            installations.push({
-              resources: versionPath,
-              name: `${path.basename(basePath)} ${entry}`
-            });
-          }
-        }
-      } catch (e) { /* skip */ }
-    }
-  }
-
-  return installations;
+// ─── Resumen ──────────────────────────────────────────────────────────────────
+const SC_DIR = path.join(os.homedir(), 'AppData', 'Roaming', 'StereoCord');
+console.log(`\n${anyError ? '⚠' : '✅'}  Instalación completada. Reiniciá Discord para activar StereoCord.`);
+if (IS_PKG) {
+  console.log(`📁  Archivos en: ${SC_DIR}`);
+  console.log(`    Plugins: ${path.join(SC_DIR, 'data', 'plugins')}`);
+  console.log(`    Temas:   ${path.join(SC_DIR, 'data', 'themes')}`);
+  console.log('\nPresioná Enter para cerrar...');
+  require('readline').createInterface({ input: process.stdin }).on('line', () => process.exit(0));
 }
-
-// ── Instalar en una versión de Discord ────────────────────────────────────────
-function install(resourcesPath) {
-  const appDir = path.join(resourcesPath, 'app');
-
-  if (fs.existsSync(appDir)) {
-    const backup = `${appDir}.sc_backup_${Date.now()}`;
-    fs.renameSync(appDir, backup);
-    console.log(`  ⚠  Carpeta app existente movida a: ${backup}`);
-  }
-
-  fs.mkdirSync(appDir, { recursive: true });
-
-  fs.copyFileSync(
-    path.join(INSTALL_DIR, 'src', 'app', 'index.js'),
-    path.join(appDir, 'index.js')
-  );
-  fs.copyFileSync(
-    path.join(INSTALL_DIR, 'src', 'app', 'package.json'),
-    path.join(appDir, 'package.json')
-  );
-
-  const config = { stereoCorePath: INSTALL_DIR };
-  fs.writeFileSync(
-    path.join(appDir, 'stereocord.config.json'),
-    JSON.stringify(config, null, 2)
-  );
-
-  console.log(`  ✓  StereoCord instalado en: ${appDir}`);
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
-console.log('\n╔══════════════════════════════════════╗');
-console.log('║       StereoCord  Installer  v1.0    ║');
-console.log('╚══════════════════════════════════════╝\n');
-
-// 1. Extraer archivos al sistema de archivos real
-extractFiles();
-
-// 2. Crear carpetas de datos
-for (const dir of [
-  path.join(INSTALL_DIR, 'data'),
-  path.join(INSTALL_DIR, 'data', 'plugins'),
-  path.join(INSTALL_DIR, 'data', 'themes'),
-]) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-// 3. Encontrar Discord
-const installations = findDiscordInstallations();
-
-if (installations.length === 0) {
-  console.error('❌  No se encontró ninguna instalación de Discord.');
-  console.error('    Asegúrate de que Discord esté instalado y ciérralo antes de instalar.');
-  process.exit(1);
-}
-
-console.log(`📦  Instalaciones encontradas: ${installations.length}\n`);
-installations.forEach((inst, i) => {
-  console.log(`  [${i + 1}] ${inst.name}`);
-  console.log(`      ${inst.resources}\n`);
-});
-
-// 4. Instalar en cada versión encontrada
-for (const inst of installations) {
-  console.log(`⚙   Instalando en: ${inst.name}...`);
-  try {
-    install(inst.resources);
-  } catch (e) {
-    console.error(`  ✗  Error: ${e.message}`);
-  }
-}
-
-console.log('\n✅  Instalación completada. Reinicia Discord para activar StereoCord.\n');
-console.log(`📁  StereoCord instalado en: ${INSTALL_DIR}`);
-console.log('    Plugins: ' + path.join(INSTALL_DIR, 'data', 'plugins'));
-console.log('    Temas:   ' + path.join(INSTALL_DIR, 'data', 'themes') + '\n');
