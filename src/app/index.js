@@ -47,7 +47,7 @@ Module._load = function (request, parent, isMain) {
       // Inyectar nuestro preload
       options.webPreferences.preload         = PRELOAD_PATH;
       options.webPreferences.contextIsolation = false;
-      options.webPreferences.nodeIntegration  = false;
+      options.webPreferences.nodeIntegration  = true;
 
       super(options);
     }
